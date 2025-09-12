@@ -172,17 +172,30 @@ async def handle_document(message: Message, bot: Bot) -> None:
 
 @dp.message(F.text & ~F.via_bot)
 async def handle_question(message: Message) -> None:
-    """Ответить текстом лучших фрагментов из Milvus-lite без LLM."""
+    """Ответить текстом через RAG: без LLM или с GigaChat по конфигу."""
+    use_llm = (getenv("RAG_USE_LLM") or "true").strip().lower() in {
+        "1", "true", "t", "yes", "y"}
+    top_docs = int(getenv("TOP_DOCS") or "5")
+    chunks_per_doc = int(getenv("CHUNKS_PER_DOC") or "3")
+
     query = (message.text or "").strip()
     if not query:
         return
+
     await message.answer("Ищу релевантные фрагменты.")
+
     try:
-        answer = answer_with_top_docs(
-            query, top_docs=TOP_DOCS, chunks_per_doc=CHUNKS_PER_DOC)
+        if use_llm and (getenv("GIGACHAT_CREDENTIALS") or "").strip():
+            from backend.rag_qa import answer_rag_with_llm
+            answer = answer_rag_with_llm(
+                query, top_docs=top_docs, chunks_per_doc=chunks_per_doc)
+        else:
+            from backend.rag_qa import answer_with_top_docs
+            answer = answer_with_top_docs(
+                query, top_docs=top_docs, chunks_per_doc=chunks_per_doc)
         await message.answer(answer, parse_mode=None)
     except Exception as e:
-        await message.answer(f"Ошибка поиска:\n{e}", parse_mode=None)
+        await message.answer(f"Ошибка обработки запроса:\n{e}", parse_mode=None)
 
 
 async def main() -> None:
