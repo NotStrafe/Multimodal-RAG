@@ -22,6 +22,9 @@ from aiogram.exceptions import TelegramBadRequest
 
 from dotenv import load_dotenv, find_dotenv
 
+from backend.indexer import index_file
+from backend.rag_qa import answer_with_top_docs
+
 
 env_path = find_dotenv(usecwd=True)
 load_dotenv(dotenv_path=env_path, override=False)
@@ -37,6 +40,8 @@ ALLOWED_EXT = tuple(
     if x.strip()
 )
 MAX_FILE_MB = int(getenv("MAX_FILE_MB") or "25")
+TOP_DOCS = int(getenv("TOP_DOCS") or "5")
+CHUNKS_PER_DOC = int(getenv("CHUNKS_PER_DOC") or "3")
 LOG_LEVEL = (getenv("LOG_LEVEL") or "INFO").upper()
 
 logging.basicConfig(
@@ -44,7 +49,7 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
     stream=sys.stdout,
 )
-logger = logging.getLogger("tg-bot-no-backend")
+logger = logging.getLogger("rag-tg-bot")
 
 start_keyboard = InlineKeyboardMarkup(
     inline_keyboard=[
@@ -62,9 +67,8 @@ async def on_start(message: Message) -> None:
     """Приветствие и базовая инструкция."""
     await message.answer(
         f"Привет, {html.bold(message.from_user.full_name)}!\n"
-        f"Сейчас бот работает без серверного бэкенда.\n"
-        f"Файлы будут сохраняться локально в ./uploads.\n\n"
-        f"Нажми «Загрузить документ» или введи /help.",
+        f"Этот бот помогает отвечать на вопросы по твоим документам.\n\n"
+        f"Нажми «Загрузить документ», затем прикрепи файл как документ.",
         reply_markup=start_keyboard,
     )
 
@@ -74,9 +78,9 @@ async def on_help_cmd(message: Message) -> None:
     """Справка по использованию бота."""
     exts = ", ".join(f".{x}" for x in ALLOWED_EXT)
     await message.answer(
-        "Функции доступные сейчас:\n"
-        "• Загрузка файла как документа и сохранение на диск в ./uploads\n"
-        "• Эхо любых текстовых сообщений\n\n"
+        "Как пользоваться:\n"
+        "• Нажми «Загрузить документ» и пришли файл как документ.\n"
+        "• После индексации задай вопрос — бот вернет релевантные фрагменты.\n\n"
         f"Поддерживаемые форматы: {exts}\n"
         f"Максимальный размер файла: {MAX_FILE_MB} MB\n",
         reply_markup=start_keyboard,
@@ -90,8 +94,7 @@ async def on_help(callback: CallbackQuery) -> None:
         "Как загрузить документ:\n"
         "1) Нажми «Загрузить документ»\n"
         "2) Нажми скрепку → «Файл/Документ»\n"
-        "3) Выбери файл (PDF/DOCX/TXT/MD/HTML)\n\n"
-        "После загрузки файл будет сохранен в ./uploads/",
+        "3) Выбери файл (PDF/DOCX/TXT/MD/HTML)\n",
         reply_markup=ReplyKeyboardRemove(),
     )
     await callback.answer()
@@ -113,7 +116,7 @@ def _ext(filename: str) -> str:
 
 @dp.message(F.document)
 async def handle_document(message: Message, bot: Bot) -> None:
-    """Принять документ и сохранить на диск."""
+    """Принять документ, сохранить на диск и запустить индексацию в Milvus-lite."""
     doc: Document = message.document
     filename = doc.file_name or "file"
     ext = _ext(filename)
@@ -151,16 +154,35 @@ async def handle_document(message: Message, bot: Bot) -> None:
         return
 
     await message.answer(
-        "Файл сохранен.\n"
-        f"Путь: <code>{dest_path.as_posix()}</code>\n"
-        "Индексация и ответы по содержимому будут добавлены после подключения бэкенда."
+        "Файл получен. Начинаю индексацию."
     )
+
+    loop = asyncio.get_running_loop()
+
+    def _run_index():
+        return index_file(str(dest_path))
+
+    try:
+        doc_id, chunks = await loop.run_in_executor(None, _run_index)
+        await message.answer(f"Индексация завершена.\nДокумент: {doc_id}\nЧанков: {chunks}")
+    except Exception as e:
+        logger.exception("indexing failed")
+        await message.answer("Ошибка индексации:\n" + html.quote(str(e)))
 
 
 @dp.message(F.text & ~F.via_bot)
-async def on_echo(message: Message) -> None:
-    """Эхо-ответ на текстовые сообщения."""
-    await message.answer(message.text)
+async def handle_question(message: Message) -> None:
+    """Ответить текстом лучших фрагментов из Milvus-lite без LLM."""
+    query = (message.text or "").strip()
+    if not query:
+        return
+    await message.answer("Ищу релевантные фрагменты.")
+    try:
+        answer = answer_with_top_docs(
+            query, top_docs=TOP_DOCS, chunks_per_doc=CHUNKS_PER_DOC)
+        await message.answer(answer, parse_mode=None)
+    except Exception as e:
+        await message.answer(f"Ошибка поиска:\n{e}", parse_mode=None)
 
 
 async def main() -> None:

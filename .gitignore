@@ -39,4 +39,7 @@ credentials.*
 .idea/
 .DS_Store
 
-2023-fall/homeworks-practice/average_rating_by_date.pdf
+__pycache__
+.hf_cache
+data
+uploads
