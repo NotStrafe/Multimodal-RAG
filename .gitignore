@@ -1,0 +1,44 @@
+# Локальные окружения
+.venv/
+venv/
+.env
+*.env
+*.ini
+*.toml
+*.cfg
+
+# Ключи и токены
+*.key
+*.pem
+*.pkl
+*.ckpt
+*.token
+*.secret
+*.credentials
+secrets.*
+credentials.*
+
+# Сырые данные
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.json
+*.parquet
+*.npy
+*.npz
+
+# Jupyter мусор
+.ipynb_checkpoints/
+*.nbconvert.ipynb
+*.nb.html
+
+# IDE и ОС
+.vscode/
+.idea/
+.DS_Store
+
+__pycache__
+.hf_cache
+data
+uploads
