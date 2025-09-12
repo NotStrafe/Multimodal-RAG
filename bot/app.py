@@ -23,7 +23,7 @@ from aiogram.exceptions import TelegramBadRequest
 from dotenv import load_dotenv, find_dotenv
 
 from backend.indexer import index_file
-from backend.rag_qa import answer_with_top_docs
+from backend.rag_qa import answer_with_top_docs, answer_rag_with_llm
 
 
 env_path = find_dotenv(usecwd=True)
@@ -43,6 +43,8 @@ MAX_FILE_MB = int(getenv("MAX_FILE_MB") or "25")
 TOP_DOCS = int(getenv("TOP_DOCS") or "5")
 CHUNKS_PER_DOC = int(getenv("CHUNKS_PER_DOC") or "3")
 LOG_LEVEL = (getenv("LOG_LEVEL") or "INFO").upper()
+RAG_USE_LLM = (getenv("RAG_USE_LLM") or "true").strip().lower() in {
+    "1", "true", "t", "yes", "y"}
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -78,10 +80,10 @@ async def on_help_cmd(message: Message) -> None:
     """Справка по использованию бота."""
     exts = ", ".join(f".{x}" for x in ALLOWED_EXT)
     await message.answer(
-        "Как пользоваться:\n"
-        "• Нажми «Загрузить документ» и пришли файл как документ.\n"
-        "• После индексации задай вопрос — бот вернет релевантные фрагменты.\n\n"
-        f"Поддерживаемые форматы: {exts}\n"
+        "Как пользоваться:\н"
+        "• Нажми «Загрузить документ» и пришли файл как документ.\н"
+        "• После индексации задай вопрос — бот вернет релевантные фрагменты или итоговый ответ.\н\n"
+        f"Поддерживаемые форматы: {exts}\н"
         f"Максимальный размер файла: {MAX_FILE_MB} MB\n",
         reply_markup=start_keyboard,
     )
@@ -153,9 +155,7 @@ async def handle_document(message: Message, bot: Bot) -> None:
         await message.answer("Ошибка скачивания файла:\n" + html.quote(str(e)))
         return
 
-    await message.answer(
-        "Файл получен. Начинаю индексацию."
-    )
+    await message.answer("Файл получен. Начинаю индексацию.")
 
     loop = asyncio.get_running_loop()
 
@@ -172,27 +172,17 @@ async def handle_document(message: Message, bot: Bot) -> None:
 
 @dp.message(F.text & ~F.via_bot)
 async def handle_question(message: Message) -> None:
-    """Ответить текстом через RAG: без LLM или с GigaChat по конфигу."""
-    use_llm = (getenv("RAG_USE_LLM") or "true").strip().lower() in {
-        "1", "true", "t", "yes", "y"}
-    top_docs = int(getenv("TOP_DOCS") or "5")
-    chunks_per_doc = int(getenv("CHUNKS_PER_DOC") or "3")
-
+    """Ответить на вопрос: либо списком фрагментов, либо финальным ответом через GigaChat."""
     query = (message.text or "").strip()
     if not query:
         return
-
-    await message.answer("Ищу релевантные фрагменты.")
-
     try:
-        if use_llm and (getenv("GIGACHAT_CREDENTIALS") or "").strip():
-            from backend.rag_qa import answer_rag_with_llm
+        if RAG_USE_LLM and (getenv("GIGACHAT_CREDENTIALS") or "").strip():
             answer = answer_rag_with_llm(
-                query, top_docs=top_docs, chunks_per_doc=chunks_per_doc)
+                query, top_docs=TOP_DOCS, chunks_per_doc=CHUNKS_PER_DOC)
         else:
-            from backend.rag_qa import answer_with_top_docs
             answer = answer_with_top_docs(
-                query, top_docs=top_docs, chunks_per_doc=chunks_per_doc)
+                query, top_docs=TOP_DOCS, chunks_per_doc=CHUNKS_PER_DOC)
         await message.answer(answer, parse_mode=None)
     except Exception as e:
         await message.answer(f"Ошибка обработки запроса:\n{e}", parse_mode=None)

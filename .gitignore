@@ -3,7 +3,6 @@
 venv/
 .env
 *.env
-.env.*
 *.ini
 *.toml
 *.cfg
