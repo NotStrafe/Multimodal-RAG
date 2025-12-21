@@ -62,7 +62,7 @@ pip install -r requirements.txt
 Создайте `.env` в корне проекта.
 
 Обязательно заполните `BOT_TOKEN`. Для включения GigaChat заполните `GIGACHAT_CREDENTIALS`. Если оставить его пустым или выставить `RAG_USE_LLM=false`, бот будет отвечать списком фрагментов без LLM.
-Для OCR нужен установленный бинарь Tesseract (например, `brew install tesseract` на macOS). Язык по умолчанию `rus+eng`, можно переопределить `OCR_LANG`.
+Язык по умолчанию `rus+eng`, можно переопределить `OCR_LANG`.
 
 ### 3) Запуск
 
