@@ -36,7 +36,7 @@ if not re.match(r"^\d{6,}:[A-Za-z0-9_-]{35,}$", BOT_TOKEN):
 
 ALLOWED_EXT = tuple(
     x.strip().lower().lstrip(".")
-    for x in (getenv("ALLOWED_EXT") or "pdf,txt,md,docx,html").split(",")
+    for x in (getenv("ALLOWED_EXT") or "pdf,txt,md,docx,html,jpg,jpeg,png,webp").split(",")
     if x.strip()
 )
 MAX_FILE_MB = int(getenv("MAX_FILE_MB") or "25")
@@ -80,10 +80,10 @@ async def on_help_cmd(message: Message) -> None:
     """Справка по использованию бота."""
     exts = ", ".join(f".{x}" for x in ALLOWED_EXT)
     await message.answer(
-        "Как пользоваться:\н"
-        "• Нажми «Загрузить документ» и пришли файл как документ.\н"
-        "• После индексации задай вопрос — бот вернет релевантные фрагменты или итоговый ответ.\н\n"
-        f"Поддерживаемые форматы: {exts}\н"
+        "Как пользоваться:\n"
+        "• Нажми «Загрузить документ» и пришли файл как документ или отправь фото напрямую.\n"
+        "• После индексации задай вопрос — бот вернет релевантные фрагменты или итоговый ответ.\n\n"
+        f"Поддерживаемые форматы: {exts}\n"
         f"Максимальный размер файла: {MAX_FILE_MB} MB\n",
         reply_markup=start_keyboard,
     )
@@ -96,7 +96,7 @@ async def on_help(callback: CallbackQuery) -> None:
         "Как загрузить документ:\n"
         "1) Нажми «Загрузить документ»\n"
         "2) Нажми скрепку → «Файл/Документ»\n"
-        "3) Выбери файл (PDF/DOCX/TXT/MD/HTML)\n",
+        "3) Выбери файл (PDF/DOCX/TXT/MD/HTML/JPG/PNG)\n",
         reply_markup=ReplyKeyboardRemove(),
     )
     await callback.answer()
@@ -114,6 +114,24 @@ async def on_upload_click(callback: CallbackQuery) -> None:
 def _ext(filename: str) -> str:
     """Вернуть расширение файла без точки, в нижнем регистре."""
     return filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+
+async def _index_and_report(message: Message, dest_path: Path) -> None:
+    """
+    Запустить индексацию файла в фоне и отправить результат.
+    """
+    await message.answer("Файл получен. Начинаю индексацию.")
+    loop = asyncio.get_running_loop()
+
+    def _run_index():
+        return index_file(str(dest_path))
+
+    try:
+        doc_id, chunks = await loop.run_in_executor(None, _run_index)
+        await message.answer(f"Индексация завершена.\nДокумент: {doc_id}\nЧанков: {chunks}")
+    except Exception as e:
+        logger.exception("indexing failed")
+        await message.answer("Ошибка индексации:\n" + html.quote(str(e)))
 
 
 @dp.message(F.document)
@@ -155,19 +173,39 @@ async def handle_document(message: Message, bot: Bot) -> None:
         await message.answer("Ошибка скачивания файла:\n" + html.quote(str(e)))
         return
 
-    await message.answer("Файл получен. Начинаю индексацию.")
+    await _index_and_report(message, dest_path)
 
-    loop = asyncio.get_running_loop()
 
-    def _run_index():
-        return index_file(str(dest_path))
+@dp.message(F.photo)
+async def handle_photo(message: Message, bot: Bot) -> None:
+    """Принять фото, сохранить на диск и отправить в OCR+CLIP индексацию."""
+    photo = message.photo[-1] if message.photo else None
+    if not photo:
+        return
+    if (photo.file_size or 0) > MAX_FILE_MB * 1024 * 1024:
+        await message.answer(
+            f"Файл слишком большой: {photo.file_size} байт. Лимит: {MAX_FILE_MB} MB."
+        )
+        return
+
+    upload_dir = Path("./uploads")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    safe_name = f"{timestamp}__photo.jpg"
+    dest_path = upload_dir / safe_name
 
     try:
-        doc_id, chunks = await loop.run_in_executor(None, _run_index)
-        await message.answer(f"Индексация завершена.\nДокумент: {doc_id}\nЧанков: {chunks}")
+        try:
+            await bot.send_chat_action(message.chat.id, ChatAction.UPLOAD_PHOTO)
+        except TelegramBadRequest:
+            pass
+        await bot.download(photo, destination=dest_path)
     except Exception as e:
-        logger.exception("indexing failed")
-        await message.answer("Ошибка индексации:\n" + html.quote(str(e)))
+        logger.exception("download photo failed")
+        await message.answer("Ошибка скачивания фото:\n" + html.quote(str(e)))
+        return
+
+    await _index_and_report(message, dest_path)
 
 
 @dp.message(F.text & ~F.via_bot)
@@ -194,7 +232,3 @@ async def main() -> None:
         parse_mode=ParseMode.HTML))
     logging.info("starting polling…")
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

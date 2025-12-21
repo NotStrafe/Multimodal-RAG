@@ -44,8 +44,20 @@ class MilvusStore:
     Обёртка над Milvus Lite для операций upsert и поиска чанков.
     """
 
-    def __init__(self, dim: int, cfg: MilvusConfig | None = None) -> None:
+    def __init__(
+        self,
+        dim: int,
+        cfg: MilvusConfig | None = None,
+        collection: str | None = None,
+    ) -> None:
         self.cfg = cfg or MilvusConfig.load()
+        if collection:
+            self.cfg = MilvusConfig(
+                db_path=self.cfg.db_path,
+                collection=collection,
+                metric=self.cfg.metric,
+                topk_limit=self.cfg.topk_limit,
+            )
         Path(self.cfg.db_path).parent.mkdir(parents=True, exist_ok=True)
         self.client = MilvusClient(self.cfg.db_path)
         if not self.client.has_collection(self.cfg.collection):
