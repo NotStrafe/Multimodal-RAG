@@ -2,12 +2,14 @@
 Поиск релевантных фрагментов и RAG-ответ через GigaChat.
 """
 
+from os import getenv
 from typing import List, Dict, Tuple
 from collections import defaultdict
 
 from .embeddings import embed_texts, embedding_dim
 from .store import MilvusStore
 from . import llm_gigachat
+from .clip_encoder import embed_queries, clip_dim
 
 
 def _group_top_by_doc(results: List[Tuple[float, Dict]], top_docs: int, chunks_per_doc: int) -> List[Dict]:
@@ -33,7 +35,16 @@ def answer_with_top_docs(query: str, top_docs: int = 5, chunks_per_doc: int = 3)
     hits = store.search(qv, top_k=top_docs * max(chunks_per_doc, 1))
     grouped = _group_top_by_doc(
         hits, top_docs=top_docs, chunks_per_doc=chunks_per_doc)
+
+    img_top = int(getenv("TOP_IMAGES", "3"))
+    img_store = MilvusStore(dim=clip_dim(),
+                            collection=getenv("MILVUS_IMAGE_COLLECTION", "rag_images"))
+    img_vec = embed_queries([query])[0]
+    img_hits = img_store.search(img_vec, top_k=img_top)
+
     lines: List[str] = []
+    if grouped:
+        lines.append("Текстовые фрагменты:")
     for g in grouped:
         lines.append(f"[{g['doc_id']}]")
         for ch in g["chunks"]:
@@ -41,6 +52,15 @@ def answer_with_top_docs(query: str, top_docs: int = 5, chunks_per_doc: int = 3)
             if len(txt) > 800:
                 txt = txt[:800] + " …"
             lines.append(f"— {txt}")
+        lines.append("")
+    if img_hits:
+        lines.append("Фото по CLIP:")
+        for _, payload in img_hits:
+            txt = str(payload.get("text", "")).strip() or "[image]"
+            if len(txt) > 400:
+                txt = txt[:400] + " …"
+            src = payload.get("source_path") or payload.get("doc_id")
+            lines.append(f"— {txt} ({src})")
         lines.append("")
     if not lines:
         return "Ничего релевантного не найдено."
@@ -58,7 +78,24 @@ def answer_rag_with_llm(query: str, top_docs: int = 4, chunks_per_doc: int = 3, 
     grouped = _group_top_by_doc(
         hits, top_docs=top_docs, chunks_per_doc=chunks_per_doc)
 
+    img_top = int(getenv("TOP_IMAGES", "3"))
+    img_store = MilvusStore(dim=clip_dim(),
+                            collection=getenv("MILVUS_IMAGE_COLLECTION", "rag_images"))
+    img_vec = embed_queries([query])[0]
+    img_hits = img_store.search(img_vec, top_k=img_top)
+
     if not grouped:
+        if img_hits:
+            ctx_lines = []
+            for _, payload in img_hits:
+                txt = str(payload.get("text", "")).strip()
+                if len(txt) > 800:
+                    txt = txt[:800] + " …"
+                ctx_lines.append(f"- {txt}")
+            ctx_text = "\n".join(ctx_lines)
+            system = "Отвечай кратко, опираясь на OCR-текст с изображений. Если ответа нет, скажи об этом."
+            user = f"Вопрос: {query}\n\nКонтекст (OCR с изображений):\n{ctx_text}"
+            return llm_gigachat.generate(system, user)
         system = "Отвечай кратко и честно. Если информации нет, скажи, что ответ в документах не найден."
         user = f"Вопрос: {query}\n\nКонтекст отсутствует."
         return llm_gigachat.generate(system, user)
@@ -68,6 +105,13 @@ def answer_rag_with_llm(query: str, top_docs: int = 4, chunks_per_doc: int = 3, 
         ctx_lines.append(f"[DOC {g['doc_id']}]")
         for ch in g["chunks"]:
             txt = str(ch.get("text", "")).strip().replace("\n", " ")
+            if len(txt) > 800:
+                txt = txt[:800] + " …"
+            ctx_lines.append(f"- {txt}")
+    if img_hits:
+        ctx_lines.append("[IMG контекст]")
+        for _, payload in img_hits:
+            txt = str(payload.get("text", "")).strip().replace("\n", " ")
             if len(txt) > 800:
                 txt = txt[:800] + " …"
             ctx_lines.append(f"- {txt}")
