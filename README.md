@@ -18,7 +18,7 @@
 - Python 3.11+
 - aiogram v3
 - Milvus Lite (через `pymilvus.MilvusClient` с локальным файлом БД)
-- Transformers + `jinaai/jina-embeddings-v3` (локальная инференс-модель, CPU/MPS)
+- Transformers + `jinaai/jina-embeddings-v3` + `jinaai/jina-clip-v2` (локальная инференс-модель, CPU/MPS)
 - GigaChat (`gigachat`, `langchain-gigachat`) для генерации итогового ответа
 - python-dotenv для подхвата `.env`
 
@@ -31,13 +31,17 @@ project-root/
     __init__.py
   backend/
     __init__.py
+    clip_encoder.py
     embeddings.py
     indexer.py
+    llm_gigachat.py
+    ocr.py
     rag_qa.py
     store.py
   uploads/             # сохраняемые файлы (создаётся автоматически)
   data/
     milvus.db          # база Milvus Lite (создаётся автоматически)
+  main.py
   .env
   requirements.txt
 ```
