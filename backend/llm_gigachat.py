@@ -1,5 +1,5 @@
 """
-Клиент GigaChat через langchain-gigachat и простая генерация ответа.
+Клиент GigaChat через langchain-gigachat: генерация ответа и обёртка для Ragas.
 """
 
 from os import getenv
@@ -7,6 +7,12 @@ from typing import Optional
 
 from langchain_gigachat.chat_models import GigaChat
 from langchain_core.messages import HumanMessage, SystemMessage
+from typing import Any
+
+try:
+    from ragas.llms import LangchainLLMWrapper
+except Exception:
+    LangchainLLMWrapper = None
 
 
 def _as_bool(v: Optional[str], default: bool) -> bool:
@@ -29,6 +35,7 @@ def _client() -> GigaChat:
         model=model,
         verify_ssl_certs=verify_ssl,
         streaming=streaming,
+        temperature=0.0,
     )
 
 
@@ -40,3 +47,13 @@ def generate(system: str, user: str) -> str:
     msgs = [SystemMessage(content=system), HumanMessage(content=user)]
     res = giga.invoke(msgs)
     return res.content or ""
+
+
+def ragas_llm() -> Any:
+    """
+    Возвращает LLM-адаптер для Ragas, использующий GigaChat.
+    """
+    if LangchainLLMWrapper is None:
+        raise RuntimeError(
+            "LangchainLLMWrapper недоступен. Проверьте версию ragas.")
+    return LangchainLLMWrapper(_client())

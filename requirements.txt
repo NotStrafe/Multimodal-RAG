@@ -21,3 +21,6 @@ pytesseract>=0.3.10,<1
 gigachat>=0.1.25,<1
 langchain-gigachat>=0.1.8,<1
 langchain-core>=0.2,<1
+ragas==0.1.10
+datasets>=2.19,<3
+evaluate>=0.4,<1
