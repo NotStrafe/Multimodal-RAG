@@ -53,7 +53,8 @@ def embed_images(paths: List[Path], batch_size: int = 8) -> np.ndarray:
             imgs = [Image.open(p).convert("RGB") for p in batch]
             inputs = _processor(images=imgs, return_tensors="pt").to(_device)
             outputs = _clip_model.get_image_features(**inputs)
-            embeds = _normalize(outputs).detach().cpu().numpy().astype(np.float32)
+            embeds = _normalize(outputs).detach(
+            ).cpu().numpy().astype(np.float32)
             out.append(embeds)
     return np.concatenate(out, axis=0) if out else np.zeros((0, _CLIP_DIM), dtype=np.float32)
 
@@ -66,9 +67,11 @@ def embed_queries(texts: List[str], batch_size: int = 32) -> np.ndarray:
     with torch.no_grad():
         for i in range(0, len(texts), batch_size):
             batch = texts[i: i + batch_size]
-            inputs = _processor(text=batch, padding=True, return_tensors="pt").to(_device)
+            inputs = _processor(text=batch, padding=True,
+                                return_tensors="pt").to(_device)
             outputs = _clip_model.get_text_features(**inputs)
-            embeds = _normalize(outputs).detach().cpu().numpy().astype(np.float32)
+            embeds = _normalize(outputs).detach(
+            ).cpu().numpy().astype(np.float32)
             out.append(embeds)
     return np.concatenate(out, axis=0) if out else np.zeros((0, _CLIP_DIM), dtype=np.float32)
 
